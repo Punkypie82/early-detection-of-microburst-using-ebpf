@@ -1,4 +1,4 @@
-# Early Detection of Microbursts - Version 0.2
+# Version 0.2
 
 This version introduces the use of a native eBPF C program, compiled with `clang`, for greater performance and flexibility. It attaches to the **egress traffic control (tc) hook point** to demonstrate basic packet monitoring. The compiled eBPF code prints the message "Hello Packet\!" to the console each time an outgoing packet is detected on a specified network interface.
 
