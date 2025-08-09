@@ -2,30 +2,29 @@
 #include <bpf/bpf_helpers.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
 
-// Define a per-CPU array map with 1 element for the counter
+struct flow_key {
+    __u32 src_ip;
+    __u32 dst_ip;
+    __u16 src_port;
+    __u16 dst_port;
+    __u8 protocol;
+};
+
 struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, struct flow_key);
     __type(value, __u64);
-} packet_counter SEC(".maps");
+} flow_counters SEC(".maps");
 
 SEC("tc")
-int hello_egress(struct __sk_buff *skb) {
-    __u32 key = 0;
-
-    // Get pointer to the counter
-    __u64 *counter = bpf_map_lookup_elem(&packet_counter, &key);
-    if (!counter)
-        return BPF_OK;
-
-    // Increment the counter atomically (per-CPU so atomic not strictly needed, but safe)
-    __sync_fetch_and_add(counter, 1);
-
+int count_flows(struct __sk_buff *skb) {
     void *data     = (void *)(long)skb->data;
     void *data_end = (void *)(long)skb->data_end;
 
@@ -40,30 +39,56 @@ int hello_egress(struct __sk_buff *skb) {
     if ((void *)(ip + 1) > data_end)
         return BPF_OK;
 
-    __u8 protocol = ip->protocol;
-    static const char proto_fmt[] = "Packet #%llu Protocol: %d\n";
-    bpf_trace_printk(proto_fmt, sizeof(proto_fmt), *counter, protocol);
+    struct flow_key key = {};
+    key.src_ip = ip->saddr;
+    key.dst_ip = ip->daddr;
+    key.protocol = ip->protocol;
 
-    static const char src_fmt[] = "Packet #%llu Src IP: %u\n";
-    bpf_trace_printk(src_fmt, sizeof(src_fmt), *counter, (__u32)ip->saddr);
+    __u16 src_port = 0, dst_port = 0;
+    void *trans_hdr = (void *)(ip + 1);
 
-    static const char dst_fmt[] = "Packet #%llu Dst IP: %u\n";
-    bpf_trace_printk(dst_fmt, sizeof(dst_fmt), *counter, (__u32)ip->daddr);
-
-    if (protocol == IPPROTO_TCP || protocol == IPPROTO_UDP) {
-        __u16 *ports = (void *)(ip + 1);
-        if ((void *)(ports + 2) > data_end)
+    if (key.protocol == IPPROTO_TCP) {
+        struct tcphdr *tcp = trans_hdr;
+        if ((void *)(tcp + 1) > data_end)
             return BPF_OK;
-
-        __u16 src_port = __builtin_bswap16(ports[0]);
-        __u16 dst_port = __builtin_bswap16(ports[1]);
-
-        static const char sport_fmt[] = "Packet #%llu Src Port: %d\n";
-        bpf_trace_printk(sport_fmt, sizeof(sport_fmt), *counter, src_port);
-
-        static const char dport_fmt[] = "Packet #%llu Dst Port: %d\n";
-        bpf_trace_printk(dport_fmt, sizeof(dport_fmt), *counter, dst_port);
+        src_port = tcp->source;
+        dst_port = tcp->dest;
+    } else if (key.protocol == IPPROTO_UDP) {
+        struct udphdr *udp = trans_hdr;
+        if ((void *)(udp + 1) > data_end)
+            return BPF_OK;
+        src_port = udp->source;
+        dst_port = udp->dest;
     }
+    key.src_port = src_port;
+    key.dst_port = dst_port;
+
+    __u64 *count = bpf_map_lookup_elem(&flow_counters, &key);
+    if (count) {
+        __sync_fetch_and_add(count, 1);
+    } else {
+        __u64 initial_count = 1;
+        bpf_map_update_elem(&flow_counters, &key, &initial_count, BPF_ANY);
+        count = &initial_count;
+    }
+
+    static const char fmt_count[] = "Flow count: %llu\n";
+    bpf_trace_printk(fmt_count, sizeof(fmt_count), *count);
+
+    static const char fmt_proto[] = "Proto: %d\n";
+    bpf_trace_printk(fmt_proto, sizeof(fmt_proto), key.protocol);
+
+    static const char fmt_src[] = "Src IP: %x\n";
+    bpf_trace_printk(fmt_src, sizeof(fmt_src), __builtin_bswap32(key.src_ip));
+
+    static const char fmt_dst[] = "Dst IP: %x\n";
+    bpf_trace_printk(fmt_dst, sizeof(fmt_dst), __builtin_bswap32(key.dst_ip));
+
+    static const char fmt_sport[] = "Src Port: %d\n";
+    bpf_trace_printk(fmt_sport, sizeof(fmt_sport), __builtin_bswap16(key.src_port));
+
+    static const char fmt_dport[] = "Dst Port: %d\n";
+    bpf_trace_printk(fmt_dport, sizeof(fmt_dport), __builtin_bswap16(key.dst_port));
 
     return BPF_OK;
 }
