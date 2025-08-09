@@ -1,4 +1,4 @@
-# Early Detection of Microbursts - Version 0.3
+# Version 0.3
 
 This project uses an eBPF C program, compiled with `clang`, to monitor network traffic. It attaches to the **egress traffic control (tc) hook point** to demonstrate basic packet monitoring and classification. For each outgoing packet detected on a specified network interface, the program prints a message containing the packet's protocol id. This version builds on previous iterations by using helper scripts that dynamically handle system architecture and network interfaces.
 
