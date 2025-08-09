@@ -18,7 +18,7 @@ To compile and run this project, you will need the following dependencies instal
 
 -----
 
-## Usage
+## How to run
 
 This project includes a set of helper scripts and a user-space application to manage the eBPF program. They require `sudo` privileges to run.
 
