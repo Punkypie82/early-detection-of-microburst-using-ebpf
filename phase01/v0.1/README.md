@@ -1,4 +1,4 @@
-# Project Name: Version 0.1
+# Version 0.1
 
 This is the initial Python BCC version of the eBPF code. It attaches to the **egress traffic control (tc) hook point** to demonstrate basic packet monitoring. The script prints the message "Hello Packet!" to the console each time an outgoing packet is detected on the specified network interface.
 
